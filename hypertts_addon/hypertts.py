@@ -457,8 +457,8 @@ class HyperTTS():
         # write to user files directory
         with _start_span(op="cache.lookup", name="audio_file_cache_check") as span:
             hash_str = self.get_hash_for_audio_request(source_text, voice_id, voice_options)
-            audio_filename = self.get_audio_filename(hash_str, format)
-            full_filename = self.get_full_audio_file_name(hash_str, format)
+            audio_filename = self.get_audio_filename(hash_str, format, voice_id, voice_options)
+            full_filename = self.get_full_audio_file_name(hash_str, format, voice_id, voice_options)
             logger.info(f'requesting audio for hash {hash_str}, full filename {full_filename}')
             cache_hit = os.path.exists(full_filename) and os.path.getsize(full_filename) > 0
             if span is not None:
@@ -490,24 +490,61 @@ class HyperTTS():
             self.anki_utils.media_add_file(full_filename)
         return f'[sound:{audio_filename}]', audio_filename
 
-    def get_full_audio_file_name(self, hash_str, format: options.AudioFormat):
+    def get_full_audio_file_name(self, hash_str, format: options.AudioFormat, voice_id: voice_module.TtsVoiceId_v3 = None, voice_options: dict = None):
         # return the absolute path of the audio file in the user_files directory
         user_files_dir = self.anki_utils.get_user_files_dir()
         # check whether the directory exists
         if not os.path.isdir(user_files_dir):
             raise errors.MissingDirectory(user_files_dir)
-        filename = self.get_audio_filename(hash_str, format)
+        filename = self.get_audio_filename(hash_str, format, voice_id, voice_options)
         return os.path.join(user_files_dir, filename)
     
-    def get_audio_filename(self, hash_str, format: options.AudioFormat):
+    def get_audio_filename(self, hash_str, format: options.AudioFormat, voice_id: voice_module.TtsVoiceId_v3 = None, voice_options: dict = None):
         extension_map = {
             options.AudioFormat.mp3: 'mp3',
             options.AudioFormat.ogg_vorbis: 'ogg',
             options.AudioFormat.ogg_opus: 'ogg',
         }
         extension = extension_map[format]
-        filename = f'{constants.AUDIO_FILENAME_PREFIX}{hash_str}.{extension}'
+        if voice_id is not None:
+            voice_label = self.get_voice_label_for_filename(voice_id, voice_options or {})
+            reserved_len = len(constants.AUDIO_FILENAME_PREFIX) + 1 + len(hash_str) + 1 + len(extension)
+            voice_label = voice_label[: max(0, 255 - reserved_len)].rstrip('-_')
+            filename = f'{constants.AUDIO_FILENAME_PREFIX}{voice_label}-{hash_str}.{extension}'
+        else:
+            filename = f'{constants.AUDIO_FILENAME_PREFIX}{hash_str}.{extension}'
         return filename
+
+    @staticmethod
+    def _sanitize_for_filename(s: str, max_length: int = 60) -> str:
+        """Replace characters that are invalid in filenames and truncate."""
+        s = re.sub(r'[\\/:*?"<>|\s]', '_', s)
+        s = re.sub(r'_+', '_', s)
+        s = s.strip('_')
+        return s[:max_length]
+
+    def get_voice_label_for_filename(self, voice_id: voice_module.TtsVoiceId_v3, voice_options: dict) -> str:
+        """Build a human-readable label from voice_id and options for use in the filename."""
+        # derive voice name from voice_key
+        voice_key = voice_id.voice_key
+        if isinstance(voice_key, dict):
+            voice_name = voice_key.get('name') or '-'.join(f'{k}_{voice_key[k]}' for k in sorted(voice_key))
+        else:
+            voice_name = str(voice_key)
+        service_name = voice_id.service if isinstance(voice_id.service, str) else str(voice_id.service)
+
+        parts = [
+            self._sanitize_for_filename(service_name, 30),
+            self._sanitize_for_filename(voice_name, 60),
+        ]
+
+        # include non-format options
+        for key, value in sorted(voice_options.items()):
+            if key == options.AUDIO_FORMAT_PARAMETER:
+                continue
+            parts.append(self._sanitize_for_filename(f'{key}_{value}', 30))
+
+        return '-'.join(p for p in parts if p)
 
     def get_hash_for_audio_request(self, source_text, voice_id: voice_module.TtsVoiceId_v3, options):
         combined_data = {
