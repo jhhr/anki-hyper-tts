@@ -683,3 +683,43 @@ yoyo
         # without voice_id falls back to legacy format
         legacy_filename = hypertts_instance.get_audio_filename(hash_str, options_module.AudioFormat.mp3)
         self.assertEqual(legacy_filename, f'{constants.AUDIO_FILENAME_PREFIX}{hash_str}.mp3')
+
+    def test_generate_audio_write_file_legacy_cache_hit(self):
+        """Files cached under the pre-voice-label filename format should be reused."""
+        import os
+        from hypertts_addon import voice as voice_module
+        from hypertts_addon import options as options_module
+        from hypertts_addon import context as context_module
+
+        config_gen = testing_utils.TestConfigGenerator()
+        hypertts_instance = config_gen.build_hypertts_instance_test_servicemanager('default')
+
+        voice_id = voice_module.TtsVoiceId_v3(
+            voice_key={'name': 'voice_a_1'},
+            service='ServiceA'
+        )
+        source_text = 'hello'
+        voice_options = {}
+        audio_format = options_module.AudioFormat.mp3
+
+        # compute the hash the same way hypertts does
+        hash_str = hypertts_instance.get_hash_for_audio_request(source_text, voice_id, voice_options)
+
+        # write a dummy file under the legacy (no-voice-label) filename
+        legacy_filename = hypertts_instance.get_legacy_audio_filename(hash_str, audio_format)
+        legacy_full_path = hypertts_instance.get_legacy_full_audio_file_name(hash_str, audio_format)
+        with open(legacy_full_path, 'wb') as f:
+            f.write(b'dummy audio data')
+
+        audio_request_context = context_module.AudioRequestContext(constants.AudioRequestReason.batch)
+        full_filename, audio_filename = hypertts_instance.generate_audio_write_file(
+            source_text, voice_id, voice_options, audio_request_context
+        )
+
+        # the returned filenames must be the legacy ones (no voice label)
+        self.assertEqual(audio_filename, legacy_filename)
+        self.assertEqual(full_filename, legacy_full_path)
+
+        # the new-format file must NOT have been created
+        new_format_filename = hypertts_instance.get_full_audio_file_name(hash_str, audio_format, voice_id, voice_options)
+        self.assertFalse(os.path.exists(new_format_filename))
