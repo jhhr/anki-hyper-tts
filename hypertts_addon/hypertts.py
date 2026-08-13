@@ -508,6 +508,8 @@ class HyperTTS():
         extension = extension_map[format]
         if voice_id is not None:
             voice_label = self.get_voice_label_for_filename(voice_id, voice_options or {})
+            reserved_len = len(constants.AUDIO_FILENAME_PREFIX) + 1 + len(hash_str) + 1 + len(extension)
+            voice_label = voice_label[: max(0, 255 - reserved_len)].rstrip('-_')
             filename = f'{constants.AUDIO_FILENAME_PREFIX}{voice_label}-{hash_str}.{extension}'
         else:
             filename = f'{constants.AUDIO_FILENAME_PREFIX}{hash_str}.{extension}'
