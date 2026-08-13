@@ -526,7 +526,7 @@ class HyperTTS():
         # derive voice name from voice_key
         voice_key = voice_id.voice_key
         if isinstance(voice_key, dict):
-            voice_name = voice_key.get('name') or '-'.join(str(v) for v in voice_key.values())
+            voice_name = voice_key.get('name') or '-'.join(f'{k}_{voice_key[k]}' for k in sorted(voice_key))
         else:
             voice_name = str(voice_key)
         service_name = voice_id.service if isinstance(voice_id.service, str) else str(voice_id.service)
