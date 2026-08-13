@@ -461,6 +461,16 @@ class HyperTTS():
             full_filename = self.get_full_audio_file_name(hash_str, format, voice_id, voice_options)
             logger.info(f'requesting audio for hash {hash_str}, full filename {full_filename}')
             cache_hit = os.path.exists(full_filename) and os.path.getsize(full_filename) > 0
+            if not cache_hit:
+                # fallback: check for a file cached under the legacy format (before voice label was
+                # added to filenames) so that existing audio is reused rather than re-billed
+                legacy_audio_filename = self.get_legacy_audio_filename(hash_str, format)
+                legacy_full_filename = self.get_legacy_full_audio_file_name(hash_str, format)
+                if os.path.exists(legacy_full_filename) and os.path.getsize(legacy_full_filename) > 0:
+                    logger.info(f'legacy cache hit at {legacy_full_filename}, using legacy filename')
+                    audio_filename = legacy_audio_filename
+                    full_filename = legacy_full_filename
+                    cache_hit = True
             if span is not None:
                 span.set_data("cache_hit", cache_hit)
         if not cache_hit:
@@ -498,6 +508,14 @@ class HyperTTS():
             raise errors.MissingDirectory(user_files_dir)
         filename = self.get_audio_filename(hash_str, format, voice_id, voice_options)
         return os.path.join(user_files_dir, filename)
+
+    def get_legacy_audio_filename(self, hash_str, format: options.AudioFormat) -> str:
+        """Return the filename in the legacy format (before voice label was introduced)."""
+        return self.get_audio_filename(hash_str, format)
+
+    def get_legacy_full_audio_file_name(self, hash_str, format: options.AudioFormat) -> str:
+        """Return the absolute path of the audio file in the legacy format (before voice label was introduced)."""
+        return self.get_full_audio_file_name(hash_str, format)
     
     def get_audio_filename(self, hash_str, format: options.AudioFormat, voice_id: voice_module.TtsVoiceId_v3 = None, voice_options: dict = None):
         extension_map = {
