@@ -606,3 +606,80 @@ yoyo
             patched_datetime.now.return_value = datetime.fromtimestamp(thirty_days_ago + 86400 * 30)  # +30 days in seconds
             days = config_with_older_install.days_since_install()
             self.assertEqual(days, 30)
+
+    def test_sanitize_for_filename(self):
+        from hypertts_addon.hypertts import HyperTTS
+
+        # basic alphanumeric stays the same
+        self.assertEqual(HyperTTS._sanitize_for_filename('HelloWorld'), 'HelloWorld')
+
+        # spaces become underscores, consecutive underscores collapsed
+        self.assertEqual(HyperTTS._sanitize_for_filename('hello world'), 'hello_world')
+        self.assertEqual(HyperTTS._sanitize_for_filename('hello  world'), 'hello_world')
+
+        # invalid filename characters replaced
+        self.assertEqual(HyperTTS._sanitize_for_filename('en-US/Jenny:Neural'), 'en-US_Jenny_Neural')
+
+        # leading/trailing underscores stripped
+        self.assertEqual(HyperTTS._sanitize_for_filename(' hello '), 'hello')
+
+        # truncation
+        long_string = 'a' * 100
+        self.assertEqual(len(HyperTTS._sanitize_for_filename(long_string, max_length=20)), 20)
+
+    def test_get_voice_label_for_filename(self):
+        from hypertts_addon.hypertts import HyperTTS
+        from hypertts_addon import voice as voice_module
+        from hypertts_addon import options as options_module
+
+        config_gen = testing_utils.TestConfigGenerator()
+        hypertts_instance = config_gen.build_hypertts_instance_test_servicemanager('default')
+
+        # dict voice_key with a 'name' entry
+        voice_id = voice_module.TtsVoiceId_v3(
+            voice_key={'name': 'en-US-JennyNeural'},
+            service='Azure'
+        )
+        label = hypertts_instance.get_voice_label_for_filename(voice_id, {})
+        self.assertTrue(label.startswith('Azure-en-US-JennyNeural'))
+
+        # options (excluding format) are appended
+        label_with_opts = hypertts_instance.get_voice_label_for_filename(
+            voice_id, {'rate': '1.2', options_module.AUDIO_FORMAT_PARAMETER: 'mp3'}
+        )
+        self.assertIn('rate_1.2', label_with_opts)
+        self.assertNotIn('format', label_with_opts)
+
+        # string voice_key
+        voice_id_str = voice_module.TtsVoiceId_v3(
+            voice_key='Joanna',
+            service='Amazon'
+        )
+        label_str = hypertts_instance.get_voice_label_for_filename(voice_id_str, {})
+        self.assertEqual(label_str, 'Amazon-Joanna')
+
+    def test_get_audio_filename_includes_voice(self):
+        from hypertts_addon import voice as voice_module
+        from hypertts_addon import options as options_module
+
+        config_gen = testing_utils.TestConfigGenerator()
+        hypertts_instance = config_gen.build_hypertts_instance_test_servicemanager('default')
+
+        voice_id = voice_module.TtsVoiceId_v3(
+            voice_key={'name': 'voice_a_1'},
+            service='ServiceA'
+        )
+        hash_str = 'deadbeef'
+        filename = hypertts_instance.get_audio_filename(hash_str, options_module.AudioFormat.mp3, voice_id, {})
+        # must start with prefix
+        self.assertTrue(filename.startswith(constants.AUDIO_FILENAME_PREFIX))
+        # must end with mp3
+        self.assertTrue(filename.endswith('.mp3'))
+        # voice info must appear between prefix and hash
+        self.assertIn('ServiceA', filename)
+        self.assertIn('voice_a_1', filename)
+        self.assertIn(hash_str, filename)
+
+        # without voice_id falls back to legacy format
+        legacy_filename = hypertts_instance.get_audio_filename(hash_str, options_module.AudioFormat.mp3)
+        self.assertEqual(legacy_filename, f'{constants.AUDIO_FILENAME_PREFIX}{hash_str}.mp3')
