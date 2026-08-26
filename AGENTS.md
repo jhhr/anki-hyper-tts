@@ -77,6 +77,23 @@ The addon uses a sophisticated configuration system:
 - **`meta.json`** - Runtime configuration including API keys (excluded from releases)
 - **`config_models.py`** - Pydantic models for type-safe configuration
 
+Configuration safety (github issue #360, configuration loss):
+- **`config_backup.py`** - rolling backups in `user_files/config_backup/` (written atomically, most
+  recent 30 kept, identical configurations deduplicated), configuration statistics, and detection of
+  data loss / corrupt `meta.json`, reported to Sentry as `errors.ConfigurationAnomaly`
+- **`component_config_backup.py`** - the *Configuration Backups* tab of the Preferences screen, where
+  a user can inspect and restore a backup
+- all configuration writes go through `HyperTTS.persist_config()`, never
+  `anki_utils.write_config()` directly: it takes the backup and refuses to persist a configuration
+  which lost all its data *and* no longer carries the `user_uuid` of the last backup (anki hands out
+  `config.json` defaults when `meta.json` cannot be parsed, and writing those back is what makes the
+  loss permanent). the `user_uuid` is what distinguishes a configuration we failed to read from one
+  the user emptied on purpose, e.g. by deleting their last preset or removing their API key — those
+  saves must always go through
+- HyperTTS never writes the configuration on startup unless a migration actually changed it, and
+  `hypertts_addon/__init__.py` only writes a newly generated `user_uuid` when the backups agree that
+  this really is a first install
+
 ### Important Development Notes
 
 - Tests use PyQt6 and require special handling for Qt components
@@ -84,6 +101,33 @@ The addon uses a sophisticated configuration system:
 - Audio files are cleaned up during packaging (`package.sh` removes user_files/*.mp3, *.ogg, *.wav)
 - Version is managed in `hypertts_addon/version.py`
 - Sentry integration is used for error tracking in production
+
+### Logging
+
+Get a logger with `logging_utils.get_child_logger(__name__)` — never `print()`, and never a bare
+`logging.getLogger()` (that logger sits outside the `hypertts` tree, propagates to Anki's root
+logger, and is dropped by `sentry_utils.sentry_filter`). It is a plain `logging.Logger`, so the
+whole stdlib API is available, `exception()` and `exc_info=True` included.
+
+Inside Anki nothing is written to stdout or stderr: the `hypertts` logger has `propagate = False`
+and only a `NullHandler`, because Anki turns anything appearing on stderr into a confusing error
+message for the user. Records are still seen by Sentry, whose `LoggingIntegration` hooks
+`logging.Logger.callHandlers` rather than installing a handler — every record becomes a breadcrumb
+and **ERROR and above becomes a Sentry issue**, so use `warning` for conditions you expect to
+happen. To get output locally, set `HYPER_TTS_DEBUG_LOGGING=enable` (stdout) or
+`HYPER_TTS_DEBUG_LOGGING=file` with `HYPER_TTS_DEBUG_LOGFILE=<path>`.
+
+Log records can additionally be shipped to Sentry Logs, off by default and enabled either by the
+*Send detailed HyperTTS logs* preference or by the `sentry-full-reporting` PostHog feature flag
+(`logging_utils.enable_sentry_remote_logging()`). The preference is meant to be switched on only
+while we diagnose a problem a user reported, so it expires on its own after
+`constants.REMOTE_LOGGING_ENABLED_DAYS` days: enabling it stamps
+`ErrorHandling.remote_logging_disable_after`, `hypertts_addon/__init__.py` checks that timestamp
+before turning remote logging on at startup, and `HyperTTS.expire_remote_logging()` writes the
+preference back off once it has passed. `HyperTTS.save_preferences()` also applies the preference
+to the running anki session through `HyperTTS.apply_remote_logging_preference()`, before it writes
+the configuration: we ask users to turn detailed logs on precisely when we suspect their
+configuration isn't being written, so it must not depend on the preference surviving a restart.
 
 ### Build and Package Process
 
@@ -101,6 +145,8 @@ When adding or changing a HyperTTS dialog, use the `anki-gui-automation` skill
 throwaway profile via `scripts/gui_automation/`, injects notes with AnkiConnect, and exposes the
 live Qt widget tree as text so dialogs can be inspected and driven without pixel hunting. Machine
 setup is documented in `docs/AI_GUI_AUTOMATION_SETUP.md`.
+
+The Anki source code is available locally at `/home/luc/src/anki/`.
 
 - give every widget you create a stable `objectName` prefixed `hypertts_<screen>_`; see
   `hypertts_addon/component_remove_audio.py` for the reference implementation

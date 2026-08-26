@@ -4,6 +4,11 @@ ENV_VAR_ANKI_LANGUAGE_TOOLS_BASE_URL = 'ANKI_LANGUAGE_TOOLS_BASE_URL'
 
 ENABLE_SENTRY_CRASH_REPORTING = True
 MAX_SENTRY_EVENTS_PER_USER_PER_GROUP = 2
+# posthog feature flag: full trace sampling and remote logging to sentry logs
+FEATURE_FLAG_SENTRY_FULL_REPORTING = 'sentry-full-reporting'
+# how long the "Send detailed HyperTTS logs" preference stays on before it disables itself. we ask
+# users to turn it on while we diagnose a problem they reported, it shouldn't stay on forever
+REMOTE_LOGGING_ENABLED_DAYS = 14
 
 LOGGER_NAME = 'hypertts'
 LOGGER_NAME_TEST = 'test_hypertts'
@@ -118,6 +123,21 @@ CONFIG_KEYBOARD_SHORTCUTS = 'keyboard_shortcuts'
 CONFIG_EXTENSIONS = 'extensions'
 CONFIG_LAST_USED_BATCH = 'last_used_batch'
 CONFIG_USE_SELECTION = 'use_selection' # whether to use the selected portion of the field
+
+# configuration backups (github issue #360). every time the addon configuration is written, a copy
+# is kept inside user_files (which anki preserves across addon upgrades), so that a user whose
+# configuration disappeared can restore it from the preferences screen.
+CONFIG_BACKUP_DIR_NAME = 'config_backup'
+CONFIG_BACKUP_FILE_PREFIX = 'hypertts_config_'
+CONFIG_BACKUP_FILE_EXTENSION = '.json'
+# how many backup files we keep around
+CONFIG_BACKUP_MAX_COUNT = 30
+# keys of the backup file envelope
+CONFIG_BACKUP_KEY_METADATA = 'backup_metadata'
+CONFIG_BACKUP_KEY_CONFIG = 'config'
+# name of the file anki uses to store addon configuration
+ANKI_ADDON_META_FILENAME = 'meta.json'
+ANKI_ADDON_META_CONFIG_KEY = 'config'
 
 ADDON_NAME = 'HyperTTS'
 MENU_PREFIX = ADDON_NAME + ':'
@@ -290,6 +310,12 @@ GUI_TEXT_NO_SERVICES_CONFIGURED = ("""Either start a HyperTTS Pro trial on the <
 GUI_TEXT_HYPERTTS_PRO_TRIAL = """Free Trial access instantly, just enter your email."""
 GUI_TEXT_HYPERTTS_PRO_BUY_PLAN = """Subscribe to HyperTTS Pro. Get access in 5mn."""
 GUI_TEXT_HYPERTTS_PRO_ENTER_API_KEY = """Enter HyperTTS Pro / AwesomeTTS Plus / Language Tools API Key."""
+# shown on the API key screen when the API key which is already in the configuration didn't verify.
+# HyperTTS keeps it rather than removing it by itself, see github issue #360
+GUI_TEXT_HYPERTTS_PRO_API_KEY_KEPT = """<i>Your API key could not be verified, so HyperTTS has <b>kept</b> it. This also happens when the HyperTTS servers cannot be reached. Try again later, or remove the API key below.</i>"""
+# shown next to the Save button of the services configuration screen while an API key is on its way
+# to being verified. saving during that window is what used to drop the API key (github issue #360)
+GUI_TEXT_HYPERTTS_PRO_VERIFYING_API_KEY = """Verifying your HyperTTS Pro API key, please wait before saving."""
 
 GUI_TEXT_HYPERTTS_PRO_ENABLED = """<b>HyperTTS Pro Enabled</b>"""
 GUI_TEXT_HYPERTTS_PRO_TRIAL_ENTER_EMAIL = """<i>Enter your email and choose a password to get instant access to premium TTS services such as Azure, Google, ElevenLabs, OpenAI, Amazon, Forvo. 7 day trial limited to 50k characters.</i>"""
@@ -336,6 +362,26 @@ GUI_TEXT_SHORTCUTS_EDITOR_ADD_AUDIO = """Add Audio to note using the selected pr
 GUI_TEXT_SHORTCUTS_EDITOR_PREVIEW_AUDIO = """Preview Audio for a note using the selected preset"""
 
 GUI_TEXT_ERROR_HANDLING_REALTIME_TTS = """How to display errors during Realtime TTS"""
+
+GUI_TEXT_ERROR_HANDLING_REMOTE_LOGGING = ("""Only enable detailed logs if we asked you to while diagnosing """
+    """a problem you reported. This setting takes effect as soon as you press Apply, and turns itself """
+    f"""off after {REMOTE_LOGGING_ENABLED_DAYS} days.""")
+GUI_TEXT_ERROR_HANDLING_REMOTE_LOGGING_EXPIRY = ("""Only enable detailed logs if we asked you to while """
+    """diagnosing a problem you reported. Detailed logs are being sent until """
+    """<b>{expiry_date}</b>, after which this setting turns itself off.""")
+
+GUI_TEXT_CONFIG_BACKUP = ("""HyperTTS keeps a copy of your configuration (presets, preset rules, services and """
+    """API keys) every time it is saved. If your configuration ever disappears, choose the most recent backup """
+    """which looks correct and restore it. Backups are stored inside the addon's <b>user_files</b> directory, """
+    """which Anki preserves when HyperTTS is upgraded.""")
+GUI_TEXT_CONFIG_BACKUP_RESTORE_WARNING = ("""Restoring a backup replaces your current HyperTTS configuration. """
+    """Your current configuration is backed up first, so this operation can be undone by restoring the """
+    """most recent backup.""")
+GUI_TEXT_CONFIG_BACKUP_RESTART = ("""HyperTTS configuration restored. Please restart Anki to make sure all """
+    """screens pick up the restored configuration.""")
+GUI_TEXT_CONFIG_LOSS_DETECTED = ("""HyperTTS could not read your configuration, it looks like it was lost or """
+    """corrupted. Your presets and API keys have not been overwritten. Go to <b>Anki: Tools -> HyperTTS """
+    """Preferences -> Configuration Backups</b> to restore your configuration from a backup.""")
 
 GUI_TEXT_EXTENSIONS = ("""Third party services are contributed by the community and live in the """
     """<b>anki-hyper-tts-extensions</b> repository. Check out (or download) that repository somewhere """

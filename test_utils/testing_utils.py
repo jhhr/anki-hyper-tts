@@ -155,10 +155,21 @@ class MockAnkiUtils():
         self.undo_started = False
         self.undo_finished = False
 
-        # user_files dir
+        # addon dir (this is where anki keeps meta.json) and user_files dir
+        self.addon_dir_tempdir = tempfile.TemporaryDirectory(prefix='hypertts_testing_addon_dir_')
+        self.addon_dir = self.addon_dir_tempdir.name
         self.user_files_dir_tempdir = tempfile.TemporaryDirectory(prefix='hypertts_testing_user_files_')
         self.user_files_dir = self.user_files_dir_tempdir.name
         logger.info(f'created userfiles temp dir: {self.user_files_dir}')
+
+        # configuration anomalies reported (see config_backup.py)
+        self.config_anomalies = []
+
+        # background tasks. when defer_background_tasks is set, run_in_background queues the tasks
+        # instead of running them right away, so that tests can look at the screen while a request
+        # is in flight (the API key verification of github issue #360, for instance)
+        self.defer_background_tasks = False
+        self.deferred_background_tasks = []
 
         # exception handling
         self.last_exception = None
@@ -192,10 +203,18 @@ class MockAnkiUtils():
         return self.config
 
     def write_config(self, config):
+        logger.info(f'writing addon configuration, {len(config)} top level keys')
         self.written_config = config
 
     def get_user_files_dir(self):
         return self.user_files_dir
+
+    def get_addon_dir(self):
+        return self.addon_dir
+
+    def report_config_anomaly(self, message, severity, extra):
+        logger.error(f'config anomaly ({severity}): {message} {extra}')
+        self.config_anomalies.append({'message': message, 'severity': severity, 'extra': extra})
 
     def get_green_stylesheet(self):
         return constants.GREEN_STYLESHEET
@@ -281,15 +300,32 @@ class MockAnkiUtils():
         return self.mock_collection
 
     def run_in_background(self, task_fn, task_done_fn):
+        if self.defer_background_tasks:
+            self.deferred_background_tasks.append((task_fn, task_done_fn))
+            return
         # just run the two tasks immediately
+        self.run_background_task(task_fn, task_done_fn)
+
+    def run_background_task(self, task_fn, task_done_fn):
         try:
             result = task_fn()
             task_done_fn(MockFuture(result))
         except Exception as e:
             task_done_fn(MockFutureException(e))
-        
+
+    def run_deferred_background_tasks(self):
+        """run the background tasks which piled up while defer_background_tasks was set"""
+        deferred_background_tasks = self.deferred_background_tasks
+        self.deferred_background_tasks = []
+        for task_fn, task_done_fn in deferred_background_tasks:
+            self.run_background_task(task_fn, task_done_fn)
+
 
     def run_on_main(self, task_fn):
+        # just run the task immediately
+        task_fn()
+
+    def run_on_main_delayed(self, task_fn, delay_ms=3000):
         # just run the task immediately
         task_fn()
 
@@ -804,8 +840,18 @@ class TestConfigGenerator():
 
     def build_hypertts_instance_test_servicemanager(self, scenario):
         addon_config = self.get_addon_config(scenario)
+        return self.build_hypertts_instance_test_servicemanager_config(addon_config)
 
+    def build_hypertts_instance_test_servicemanager_config(self, addon_config,
+            user_files_dir=None, addon_dir=None):
+        """build a hypertts instance with the given addon configuration dict. user_files_dir and
+        addon_dir can be pointed at the directories of a previous instance, to simulate restarting
+        anki with the configuration backups of the previous session in place."""
         anki_utils = MockAnkiUtils(addon_config)
+        if user_files_dir != None:
+            anki_utils.user_files_dir = user_files_dir
+        if addon_dir != None:
+            anki_utils.addon_dir = addon_dir
         manager = servicemanager.ServiceManager(get_test_services_dir(), f'{constants.DIR_HYPERTTS_ADDON}.test_services', True, MockCloudLanguageTools())
         manager.init_services()
         manager.get_service('ServiceA').enabled = True
